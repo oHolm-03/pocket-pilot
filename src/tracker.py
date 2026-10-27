@@ -1,72 +1,59 @@
-import json
-import os
 from datetime import datetime, timedelta
 
-#manages financial transactions and data persistance
+
+# Manages financial transactions stored in Supabase.
 class FinanceTracker:
-    def __init__(self, filename='data/finance_data.json'):
-        # Store the filename as an instance variable (self.filename)
-        self.filename = filename
-        # Make sure the directory exists
-        self._ensure_data_directory()
-        # Load existing transactions from file
+    def __init__(self, supabase_client, user_id):
+        self.supabase = supabase_client
+        self.user_id = user_id
         self.transactions = self.load_data()
 
-    # HELPER METHOD, creates directory if it doesn't exist
-    def _ensure_data_directory(self):
-            # Extract directory path from filename
-            directory = os.path.dirname(self.filename)
-            
-            # Only proceed if directory is not empty string AND doesn't already exist
-            if directory and not os.path.exists(directory):
-                # Create the directory (and any parent directories needed)
-                os.makedirs(directory)
-
-    #Loading data from file
     def load_data(self):
-            # Check if the file exists before trying to read it
-            if os.path.exists(self.filename):
-                # Open the file in read mode ('r')
-                with open(self.filename, 'r') as f:
-                    # json.load() reads the file and converts JSON to Python list
-                    return json.load(f)
-            
-            # If file doesn't exist, return empty list (brand new tracker)
-            return []
-
-    #Saving data to file
-    def save_data(self):
-            # Open file in write mode ('w') - creates file if it doesn't exist
-            with open(self.filename, 'w') as f:
-                # json.dump() converts Python list to JSON and writes to file
-                json.dump(self.transactions, f, indent=2)
+        response = (
+            self.supabase
+            .table("transactions")
+            .select("id, date, type, amount, description")
+            .eq("user_id", self.user_id)
+            .order("date")
+            .execute()
+        )
+        return response.data
 
     #Adding new transactions
     def add_transaction(self, amount, trans_type, description=''):
-            # Create a dictionary to represent this transaction
-            transaction = {
-                # Get current date and time, format as string: '2025-01-11 14:30:00'
-                'date': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-                
-                # Store the type ('income' or 'expense')
-                'type': trans_type,
-                
-                # Convert amount to float (handles if user passes int or string)
-                'amount': float(amount),
-                
-                # Store the description (empty string if not provided)
-                'description': description
-            }
-            
-            # Add this transaction to our list of all transactions
-            # self.transactions is a list, .append() adds to the end
-            self.transactions.append(transaction)
-            
-            # Save to file immediately so data isn't lost
-            self.save_data()
-            
-            # Return the transaction in case caller needs it
-            return transaction
+        transaction = {
+            'user_id': self.user_id,
+            'type': trans_type,
+            'amount': float(amount),
+            'description': description,
+        }
+
+        response = (
+            self.supabase
+            .table("transactions")
+            .insert(transaction)
+            .select("id, date, type, amount, description")
+            .execute()
+        )
+        inserted_transaction = response.data[0]
+        self.transactions.append(inserted_transaction)
+        return inserted_transaction
+
+    def delete_transaction(self, transaction_id):
+        response = (
+            self.supabase
+            .table("transactions")
+            .delete()
+            .eq("id", transaction_id)
+            .eq("user_id", self.user_id)
+            .execute()
+        )
+        if response.data:
+            self.transactions = [
+                transaction for transaction in self.transactions
+                if transaction['id'] != transaction_id
+            ]
+        return response.data
 
     #Current total balance
     def get_balance(self):
@@ -87,6 +74,13 @@ class FinanceTracker:
             # Return the final calculated balance
             return balance
 
+    def _parse_date(self, value):
+        if isinstance(value, datetime):
+            return value
+        if isinstance(value, str):
+            return datetime.fromisoformat(value.replace('Z', '+00:00'))
+        raise ValueError(f"Invalid transaction date: {value}")
+
     #Calculate balance for each day using ML
     def get_daily_balances(self):
             # If no transactions exist, return empty lists
@@ -99,7 +93,7 @@ class FinanceTracker:
             
             # Get the date of the very first transaction
             # strptime() converts string '2025-01-11 14:30:00' to datetime object
-            start_date = datetime.strptime(sorted_trans[0]['date'], '%Y-%m-%d %H:%M:%S')
+            start_date = self._parse_date(sorted_trans[0]['date'])
             
             # Initialize empty lists to store our results
             dates = []  # Will hold date objects
@@ -112,7 +106,7 @@ class FinanceTracker:
             # Process each transaction in chronological order
             for t in sorted_trans:
                 # Get the date of this transaction
-                trans_date = datetime.strptime(t['date'], '%Y-%m-%d %H:%M:%S').date()
+                trans_date = self._parse_date(t['date']).date()
                 
                 # Fill in all days BEFORE this transaction (days with no activity)
                 # Example: If transaction on Jan 5 and we're on Jan 3, fill Jan 3 and 4
