@@ -61,6 +61,7 @@
             <div class="card-body">
                 <!-- Form submits to /add_transaction route -->
                 <form method="POST" action="/add_transaction" class="row g-3">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                     <!-- Transaction Type -->
                     <div class="col-md-3">
                         <label for="type" class="form-label">Type</label>
@@ -137,11 +138,13 @@
                                     <td>${{ "{:,.2f}".format(transaction.amount) }}</td>
                                     <td>{{ transaction.description or '-' }}</td>
                                     <td>
-                                        <a href="/delete_transaction/{{ loop.revindex0 }}" 
-                                           class="btn btn-sm btn-danger"
-                                           onclick="return confirm('Delete this transaction?')">
-                                            <i class="fas fa-trash"></i>
-                                        </a>
+                                        <form method="POST" action="{{ url_for('delete_transaction', transaction_id=transaction.id) }}"
+                                              onsubmit="return confirm('Delete this transaction?')">
+                                            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                                            <button type="submit" class="btn btn-sm btn-danger">
+                                                <i class="fas fa-trash"></i>
+                                            </button>
+                                        </form>
                                     </td>
                                 </tr>
                                 {% endfor %}
