@@ -153,6 +153,7 @@ def predictions():
     tracker = get_current_tracker()
     #get num days from URL parameter (def 30)
     days = request.args.get('days', 30, type=int)
+    days = max(7, min(days, 365))
 
     #get predictions from a predictor for the signed-in user
     predictor = BalancePredictor(tracker)
@@ -255,6 +256,13 @@ def predictions():
         chart_json = json.dumps(fig, cls=plotly.utils.PlotlyJSONEncoder)
 
         return render_template('predictions.html', chart_json=chart_json, trend_info=trend_info, days=days)
+
+    return render_template(
+        'predictions.html',
+        chart_json=None,
+        trend_info=None,
+        days=days,
+    )
     
 @app.route('/analytics')
 @login_required
