@@ -33,3 +33,34 @@ main {
     max-height: 500px;
     overflow-y: auto;
 }
+
+.transactions-table {
+    max-height: 650px;
+}
+
+.transactions-table thead th {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+}
+
+.sort-button {
+    border: 0;
+    background: transparent;
+    color: inherit;
+    font-weight: 600;
+    padding: 0;
+}
+
+.sort-button:hover,
+.sort-button:focus {
+    color: var(--bs-primary);
+}
+
+.sort-button.sort-desc .fa-sort::before {
+    content: "\f0dd";
+}
+
+.sort-button.sort-asc .fa-sort::before {
+    content: "\f0de";
+}

@@ -3,6 +3,7 @@ from dotenv import load_dotenv
 import numpy as np
 from src.tracker import FinanceTracker
 from src.predictor import BalancePredictor
+from src.transactions import TransactionQuery
 import plotly.graph_objs as go
 import plotly.utils
 import json
@@ -11,6 +12,7 @@ from functools import wraps
 import secrets
 import hmac
 from supabase import create_client
+from supabase_auth.errors import AuthApiError, AuthSessionMissingError
 
 load_dotenv()
 
@@ -29,6 +31,23 @@ app.config.update(
     SESSION_COOKIE_HTTPONLY=True,
     SESSION_COOKIE_SAMESITE='Lax',
 )
+
+
+class InvalidSupabaseSession(Exception):
+    pass
+
+
+def clear_supabase_session():
+    flask_session.pop('supabase_access_token', None)
+    flask_session.pop('supabase_refresh_token', None)
+    flask_session.pop('user_id', None)
+
+
+@app.errorhandler(InvalidSupabaseSession)
+def handle_invalid_supabase_session(_error):
+    clear_supabase_session()
+    flash('Your session has expired. Please sign in again.', 'warning')
+    return redirect(url_for('login'))
 
 
 @app.before_request
@@ -52,7 +71,14 @@ def create_user_client():
     access_token = flask_session.get('supabase_access_token')
     refresh_token = flask_session.get('supabase_refresh_token')
     if access_token and refresh_token:
-        client.auth.set_session(access_token, refresh_token)
+        try:
+            response = client.auth.set_session(access_token, refresh_token)
+            if response.session:
+                flask_session['supabase_access_token'] = response.session.access_token
+                flask_session['supabase_refresh_token'] = response.session.refresh_token
+        except (AuthApiError, AuthSessionMissingError) as error:
+            clear_supabase_session()
+            raise InvalidSupabaseSession(str(error))
     return client
 
 
@@ -132,6 +158,44 @@ def index():
 
     #render the HTML tempalte and pass data to it
     return render_template('index.html', stats=stats, transactions=recent_transactions)
+
+@app.route('/transactions')
+@login_required
+def transactions():
+    tracker = get_current_tracker()
+    filters = {
+        'query': request.args.get('q', '').strip(),
+        'transaction_type': request.args.get('type', 'all'),
+        'date_from': request.args.get('date_from', ''),
+        'date_to': request.args.get('date_to', ''),
+        'min_amount': request.args.get('min_amount', ''),
+        'max_amount': request.args.get('max_amount', ''),
+    }
+
+    if filters['transaction_type'] not in ('all', 'income', 'expense'):
+        filters['transaction_type'] = 'all'
+
+    filtered_transactions = TransactionQuery.filter(
+        tracker.transactions,
+        query=filters['query'],
+        transaction_type=filters['transaction_type'],
+        date_from=filters['date_from'],
+        date_to=filters['date_to'],
+        min_amount=filters['min_amount'],
+        max_amount=filters['max_amount'],
+    )
+    filtered_transactions = TransactionQuery.sort(
+        filtered_transactions,
+        field=request.args.get('sort', 'date'),
+        direction=request.args.get('direction', 'desc'),
+    )
+
+    return render_template(
+        'transactions.html',
+        transactions=filtered_transactions,
+        total_count=len(tracker.transactions),
+        filters=filters,
+    )
 
 @app.route('/add_transaction', methods=['POST'])
 @login_required
@@ -296,6 +360,10 @@ def analytics():
 def delete_transaction(transaction_id):
     tracker = get_current_tracker()
     tracker.delete_transaction(transaction_id)
+
+    return_to = request.form.get('next', '')
+    if return_to.startswith('/') and not return_to.startswith('//'):
+        return redirect(return_to)
     return redirect(url_for('index'))
     
 # Run the server
